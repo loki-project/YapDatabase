@@ -26,6 +26,7 @@
 #pragma unused(ydbLogLevel)
 
 typedef BOOL (^YapBoolBlock)(void);
+const NSUInteger kDefaultChunkSize = 10 * 1000;
 
 @implementation YapDatabaseReadTransaction
 
@@ -1577,7 +1578,7 @@ typedef BOOL (^YapBoolBlock)(void);
 	int const column_idx_collection = SQLITE_COLUMN_START;
 	
     __block int status;
-    [self whileLoopWithChunkSize:1000
+    [self whileLoopWithChunkSize:kDefaultChunkSize
                        condition:^{
                            if (stop || mutation.isMutated) {
                                return NO;
@@ -3042,7 +3043,7 @@ typedef BOOL (^YapBoolBlock)(void);
 		sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
 		
         __block int status;
-        [self whileLoopWithChunkSize:1000
+        [self whileLoopWithChunkSize:kDefaultChunkSize
                            condition:^{
                                if (stop || mutation.isMutated) {
                                    return NO;
@@ -3170,7 +3171,7 @@ typedef BOOL (^YapBoolBlock)(void);
 	BOOL unlimitedObjectCacheLimit = (connection->objectCacheLimit == 0);
 	
     __block int status;
-    [self whileLoopWithChunkSize:1000
+    [self whileLoopWithChunkSize:kDefaultChunkSize
                        condition:^{
                            if (stop || mutation.isMutated) {
                                return NO;
