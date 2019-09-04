@@ -271,7 +271,6 @@ static NSString *const ext_key_class = @"class";
 - (sqlite3_stmt *)removeAllStatement;
 
 - (sqlite3_stmt *)enumerateCollectionsStatement:(BOOL *)needsFinalizePtr;
-- (sqlite3_stmt *)enumerateCollectionsForKeyStatement:(BOOL *)needsFinalizePtr;
 - (sqlite3_stmt *)enumerateKeysInCollectionStatement:(BOOL *)needsFinalizePtr;
 - (sqlite3_stmt *)enumerateKeysInAllCollectionsStatement:(BOOL *)needsFinalizePtr;
 - (sqlite3_stmt *)enumerateKeysAndMetadataInCollectionStatement:(BOOL *)needsFinalizePtr;

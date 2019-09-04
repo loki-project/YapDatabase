@@ -189,16 +189,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)enumerateCollectionsUsingBlock:(void (^)(NSString *collection, BOOL *stop))block;
 
 /**
- * This method is rarely needed, but may be helpful in certain situations.
- * 
- * This method may be used if you have the key, but not the collection for a particular item.
- * Please note that this is not the ideal situation.
- * 
- * Since there may be numerous collections for a given key, this method enumerates all possible collections.
-**/
-- (void)enumerateCollectionsForKey:(NSString *)key usingBlock:(void (^)(NSString *collection, BOOL *stop))block;
-
-/**
  * Fast enumeration over all keys in the given collection.
  *
  * This uses a "SELECT key FROM database WHERE collection = ?" operation,
