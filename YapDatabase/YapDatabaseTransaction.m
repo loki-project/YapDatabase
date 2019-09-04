@@ -1577,6 +1577,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	
 	int const column_idx_collection = SQLITE_COLUMN_START;
 	
+    YapDatabaseConnection *connection = self.connection;
     __block int status;
     [self whileLoopWithBatchSize:kDefaultBatchSize
                        condition:^{
@@ -2003,6 +2004,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	YapDatabaseString _collection; MakeYapDatabaseString(&_collection, collection);
 	sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
 	
+    YapDatabaseConnection *connection = self.connection;
     __block int status;
     [self whileLoopWithBatchSize:kDefaultBatchSize
                        condition:^{
@@ -2067,7 +2069,8 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 		YapDatabaseString _collection; MakeYapDatabaseString(&_collection, collection);
 		sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
 		
-        __block int status;
+        YapDatabaseConnection *connection = self.connection;
+    __block int status;
         [self whileLoopWithBatchSize:kDefaultBatchSize
                            condition:^{
                                if (stop || mutation.isMutated) {
@@ -2132,6 +2135,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	int const column_idx_collection = SQLITE_COLUMN_START + 1;
 	int const column_idx_key        = SQLITE_COLUMN_START + 2;
 	
+    YapDatabaseConnection *connection = self.connection;
     __block int status;
     [self whileLoopWithBatchSize:kDefaultBatchSize
                        condition:^{
@@ -2221,6 +2225,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	
 	BOOL unlimitedObjectCacheLimit = (connection->objectCacheLimit == 0);
 	
+    YapDatabaseConnection *connection = self.connection;
     __block int status;
     [self whileLoopWithBatchSize:kDefaultBatchSize
                        condition:^{
@@ -2243,7 +2248,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 		{
 			YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
 			
-			id object = [self.connection->objectCache objectForKey:cacheKey];
+			id object = [connection->objectCache objectForKey:cacheKey];
 			if (object == nil)
 			{
 				const void *oBlob = sqlite3_column_blob(statement, column_idx_data);
@@ -2253,7 +2258,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 				// Use dataWithBytesNoCopy to avoid an extra allocation and memcpy.
 				
 				NSData *oData = [NSData dataWithBytesNoCopy:(void *)oBlob length:oBlobSize freeWhenDone:NO];
-				object = self.connection->database->objectDeserializer(collection, key, oData);
+				object = connection->database->objectDeserializer(collection, key, oData);
 				
 				// Cache considerations:
 				// Do we want to add the objects/metadata to the cache here?
@@ -2262,10 +2267,10 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 				// The cache should generally be reserved for items that are explicitly fetched,
 				// and we don't want to crowd them out during enumerations.
 				
-				if (unlimitedObjectCacheLimit || [self.connection->objectCache count] < self.connection->objectCacheLimit)
+				if (unlimitedObjectCacheLimit || [connection->objectCache count] < connection->objectCacheLimit)
 				{
 					if (object)
-						[self.connection->objectCache setObject:object forKey:cacheKey];
+						[connection->objectCache setObject:object forKey:cacheKey];
 				}
 			}
 			
@@ -2339,7 +2344,8 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 		YapDatabaseString _collection; MakeYapDatabaseString(&_collection, collection);
 		sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
 		
-        __block int status;
+        YapDatabaseConnection *connection = self.connection;
+    __block int status;
         [self whileLoopWithBatchSize:kDefaultBatchSize
                            condition:^{
                                if (stop || mutation.isMutated) {
@@ -2349,7 +2355,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
                                status = sqlite3_step(statement);
                                return (BOOL) (status == SQLITE_ROW);
                            } loopBlock:^{
-            __unsafe_unretained YapDatabaseConnection *connection = self.connection;
+            __unsafe_unretained YapDatabaseConnection *connection = connection;
 
 			int64_t rowid = sqlite3_column_int64(statement, column_idx_rowid);
 			
@@ -2467,6 +2473,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	
 	BOOL unlimitedObjectCacheLimit = (connection->objectCacheLimit == 0);
 	
+    YapDatabaseConnection *connection = self.connection;
     __block int status;
     [self whileLoopWithBatchSize:kDefaultBatchSize
                        condition:^{
@@ -2477,7 +2484,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
                            status = sqlite3_step(statement);
                            return (BOOL) (status == SQLITE_ROW);
                        } loopBlock:^{
-        __unsafe_unretained YapDatabaseConnection *connection = self.connection;
+        __unsafe_unretained YapDatabaseConnection *connection = connection;
                            
 		int64_t rowid = sqlite3_column_int64(statement, column_idx_rowid);
 		
@@ -2600,6 +2607,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	
 	BOOL unlimitedMetadataCacheLimit = (connection->metadataCacheLimit == 0);
 	
+    YapDatabaseConnection *connection = self.connection;
     __block int status;
     [self whileLoopWithBatchSize:kDefaultBatchSize
                        condition:^{
@@ -2622,7 +2630,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 		{
 			YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
 		
-			id metadata = [self.connection->metadataCache objectForKey:cacheKey];
+			id metadata = [connection->metadataCache objectForKey:cacheKey];
 			if (metadata)
 			{
 				if (metadata == [YapNull null])
@@ -2639,7 +2647,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 					// Use dataWithBytesNoCopy to avoid an extra allocation and memcpy.
 					
 					NSData *mData = [NSData dataWithBytesNoCopy:(void *)mBlob length:mBlobSize freeWhenDone:NO];
-					metadata = self.connection->database->metadataDeserializer(collection, key, mData);
+					metadata = connection->database->metadataDeserializer(collection, key, mData);
 				}
 				
 				// Cache considerations:
@@ -2650,12 +2658,12 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 				// and we don't want to crowd them out during enumerations.
 				
 				if (unlimitedMetadataCacheLimit ||
-				    [self.connection->metadataCache count] < self.connection->metadataCacheLimit)
+				    [connection->metadataCache count] < connection->metadataCacheLimit)
 				{
 					if (metadata)
-						[self.connection->metadataCache setObject:metadata forKey:cacheKey];
+						[connection->metadataCache setObject:metadata forKey:cacheKey];
 					else
-						[self.connection->metadataCache setObject:[YapNull null] forKey:cacheKey];
+						[connection->metadataCache setObject:[YapNull null] forKey:cacheKey];
 				}
 			}
 			
@@ -2731,7 +2739,8 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 		YapDatabaseString _collection; MakeYapDatabaseString(&_collection, collection);
 		sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
 		
-        __block int status;
+        YapDatabaseConnection *connection = self.connection;
+    __block int status;
         [self whileLoopWithBatchSize:kDefaultBatchSize
                            condition:^{
                                if (stop || mutation.isMutated) {
@@ -2868,6 +2877,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	
 	BOOL unlimitedMetadataCacheLimit = (connection->metadataCacheLimit == 0);
 	
+    YapDatabaseConnection *connection = self.connection;
     __block int status;
     [self whileLoopWithBatchSize:kDefaultBatchSize
                        condition:^{
@@ -3002,6 +3012,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	BOOL unlimitedObjectCacheLimit = (connection->objectCacheLimit == 0);
 	BOOL unlimitedMetadataCacheLimit = (connection->metadataCacheLimit == 0);
 	
+    YapDatabaseConnection *connection = self.connection;
     __block int status;
     [self whileLoopWithBatchSize:kDefaultBatchSize
                        condition:^{
@@ -3159,7 +3170,8 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 		YapDatabaseString _collection; MakeYapDatabaseString(&_collection, collection);
 		sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
 		
-        __block int status;
+        YapDatabaseConnection *connection = self.connection;
+    __block int status;
         [self whileLoopWithBatchSize:kDefaultBatchSize
                            condition:^{
                                if (stop || mutation.isMutated) {
@@ -3324,6 +3336,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	BOOL unlimitedObjectCacheLimit = (connection->objectCacheLimit == 0);
 	BOOL unlimitedMetadataCacheLimit = (connection->metadataCacheLimit == 0);
 	
+    YapDatabaseConnection *connection = self.connection;
     __block int status;
     [self whileLoopWithBatchSize:kDefaultBatchSize
                        condition:^{
