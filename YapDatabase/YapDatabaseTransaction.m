@@ -2355,7 +2355,6 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
                                status = sqlite3_step(statement);
                                return (BOOL) (status == SQLITE_ROW);
                            } loopBlock:^{
-            __unsafe_unretained YapDatabaseConnection *connection = connection;
 
 			int64_t rowid = sqlite3_column_int64(statement, column_idx_rowid);
 			
@@ -2484,7 +2483,6 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
                            status = sqlite3_step(statement);
                            return (BOOL) (status == SQLITE_ROW);
                        } loopBlock:^{
-        __unsafe_unretained YapDatabaseConnection *connection = connection;
                            
 		int64_t rowid = sqlite3_column_int64(statement, column_idx_rowid);
 		
