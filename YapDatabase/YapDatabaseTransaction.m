@@ -2070,7 +2070,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 		sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
 		
         YapDatabaseConnection *connection = self.connection;
-    __block int status;
+        __block int status;
         [self whileLoopWithBatchSize:kDefaultBatchSize
                            condition:^{
                                if (stop || mutation.isMutated) {
@@ -2345,7 +2345,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 		sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
 		
         YapDatabaseConnection *connection = self.connection;
-    __block int status;
+        __block int status;
         [self whileLoopWithBatchSize:kDefaultBatchSize
                            condition:^{
                                if (stop || mutation.isMutated) {
@@ -2738,7 +2738,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 		sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
 		
         YapDatabaseConnection *connection = self.connection;
-    __block int status;
+        __block int status;
         [self whileLoopWithBatchSize:kDefaultBatchSize
                            condition:^{
                                if (stop || mutation.isMutated) {
@@ -3169,7 +3169,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 		sqlite3_bind_text(statement, bind_idx_collection, _collection.str, _collection.length, SQLITE_STATIC);
 		
         YapDatabaseConnection *connection = self.connection;
-    __block int status;
+        __block int status;
         [self whileLoopWithBatchSize:kDefaultBatchSize
                            condition:^{
                                if (stop || mutation.isMutated) {
