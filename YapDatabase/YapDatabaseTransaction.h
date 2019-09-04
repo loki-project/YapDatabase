@@ -369,54 +369,6 @@ NS_ASSUME_NONNULL_BEGIN
                     (void (^)(NSString *collection, NSString *key, id object, __nullable id metadata, BOOL *stop))block
          withFilter:(nullable BOOL (^)(NSString *collection, NSString *key))filter;
 
-/**
- * Enumerates over the given list of keys (unordered).
- *
- * This method is faster than fetching individual items as it optimizes cache access.
- * That is, it will first enumerate over items in the cache and then fetch items from the database,
- * thus optimizing the cache and reducing query size.
- *
- * If any keys are missing from the database, the 'object' parameter will be nil.
- *
- * IMPORTANT:
- * Due to cache optimizations, the items may not be enumerated in the same order as the 'keys' parameter.
-**/
-- (void)enumerateObjectsForKeys:(NSArray<NSString *> *)keys
-                   inCollection:(nullable NSString *)collection
-            unorderedUsingBlock:(void (^)(NSUInteger keyIndex, id __nullable object, BOOL *stop))block;
-
-/**
- * Enumerates over the given list of keys (unordered).
- *
- * This method is faster than fetching individual items as it optimizes cache access.
- * That is, it will first enumerate over items in the cache and then fetch items from the database,
- * thus optimizing the cache and reducing query size.
- *
- * If any keys are missing from the database, the 'metadata' parameter will be nil.
- *
- * IMPORTANT:
- * Due to cache optimizations, the items may not be enumerated in the same order as the 'keys' parameter.
-**/
-- (void)enumerateMetadataForKeys:(NSArray<NSString *> *)keys
-                    inCollection:(nullable NSString *)collection
-             unorderedUsingBlock:(void (^)(NSUInteger keyIndex, __nullable id metadata, BOOL *stop))block;
-
-/**
- * Enumerates over the given list of keys (unordered).
- *
- * This method is faster than fetching individual items as it optimizes cache access.
- * That is, it will first enumerate over items in the cache and then fetch items from the database,
- * thus optimizing the cache and reducing query size.
- *
- * If any keys are missing from the database, the 'object' and 'metadata' parameter will be nil.
- *
- * IMPORTANT:
- * Due to cache optimizations, the items may not be enumerated in the same order as the 'keys' parameter.
-**/
-- (void)enumerateRowsForKeys:(NSArray<NSString *> *)keys
-                inCollection:(nullable NSString *)collection
-         unorderedUsingBlock:(void (^)(NSUInteger keyIndex, __nullable id object, __nullable id metadata, BOOL *stop))block;
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Extensions
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
