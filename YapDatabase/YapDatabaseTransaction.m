@@ -2541,7 +2541,12 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
                      condition:(YapBoolBlock)conditionBlock
                      loopBlock:(dispatch_block_t)loopBlock
 {
+    NSUInteger batchIndex = 0;
     while (YES) {
+        if (batchIndex > 0) {
+            // This will log in DEBUG builds but not production.
+            YDBLogInfo(@"batchIndex: %lu (%lu)", (unsigned long) batchIndex, (unsigned long) (batchIndex * batchSize));
+        }
         @autoreleasepool {
             for (NSUInteger batchCounter = 0; batchCounter < batchSize; batchCounter++) {
                 if (!conditionBlock()) {
@@ -2550,6 +2555,7 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
                 loopBlock();
             }
         }
+        batchIndex++;
     }
 }
 
