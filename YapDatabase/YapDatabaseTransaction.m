@@ -1610,6 +1610,61 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 }
 
 /**
+ * This method is rarely needed, but may be helpful in certain situations.
+ * 
+ * This method may be used if you have the key, but not the collection for a particular item.
+ * Please note that this is not the ideal situation.
+ * 
+ * Since there may be numerous collections for a given key, this method enumerates all possible collections.
+**/
+- (void)enumerateCollectionsForKey:(NSString *)key usingBlock:(void (^)(NSString *collection, BOOL *stop))block
+{
+	if (key == nil) return;
+	if (block == NULL) return;
+	
+	BOOL needsFinalize;
+	sqlite3_stmt *statement = [connection enumerateCollectionsForKeyStatement:&needsFinalize];
+	if (statement == NULL) return;
+	
+	YapMutationStackItem_Bool *mutation = [connection->mutationStack push]; // mutation during enumeration protection
+	BOOL stop = NO;
+	
+	// SELECT "collection" FROM "database2" WHERE "key" = ?;
+	
+	int const column_idx_collection = SQLITE_COLUMN_START;
+	int const bind_idx_key          = SQLITE_BIND_START;
+	
+	YapDatabaseString _key; MakeYapDatabaseString(&_key, key);
+	sqlite3_bind_text(statement, bind_idx_key, _key.str, _key.length, SQLITE_STATIC);
+	
+	int status;
+	while ((status = sqlite3_step(statement)) == SQLITE_ROW)
+	{
+		const unsigned char *text = sqlite3_column_text(statement, column_idx_collection);
+		int textSize = sqlite3_column_bytes(statement, column_idx_collection);
+		
+		NSString *collection = [[NSString alloc] initWithBytes:text length:textSize encoding:NSUTF8StringEncoding];
+		
+		block(collection, &stop);
+		
+		if (stop || mutation.isMutated) break;
+	}
+	
+	if ((status != SQLITE_DONE) && !stop && !mutation.isMutated)
+	{
+		YDBLogError(@"%@ - sqlite_step error: %d %s", THIS_METHOD, status, sqlite3_errmsg(connection->db));
+	}
+	
+	sqlite_enum_reset(statement, needsFinalize);
+	FreeYapDatabaseString(&_key);
+	
+	if (!stop && mutation.isMutated)
+	{
+		@throw [self mutationDuringEnumerationException];
+	}
+}
+
+/**
  * Fast enumeration over all keys in the given collection.
  *
  * This uses a "SELECT key FROM database WHERE collection = ?" operation,

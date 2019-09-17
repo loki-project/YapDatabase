@@ -141,6 +141,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	sqlite3_stmt *removeAllStatement;
 	
 	sqlite3_stmt *enumerateCollectionsStatement;
+	sqlite3_stmt *enumerateCollectionsForKeyStatement;
 	sqlite3_stmt *enumerateKeysInCollectionStatement;
 	sqlite3_stmt *enumerateKeysInAllCollectionsStatement;
 	sqlite3_stmt *enumerateKeysAndMetadataInCollectionStatement;
@@ -505,6 +506,7 @@ static int connectionBusyHandler(void *ptr, int count)
 	sqlite_finalize_null(&removeAllStatement);
 	
 	sqlite_finalize_null(&enumerateCollectionsStatement);
+	sqlite_finalize_null(&enumerateCollectionsForKeyStatement);
 	sqlite_finalize_null(&enumerateKeysInCollectionStatement);
 	sqlite_finalize_null(&enumerateKeysInAllCollectionsStatement);
 	sqlite_finalize_null(&enumerateKeysAndMetadataInCollectionStatement);
@@ -1522,6 +1524,51 @@ static int connectionBusyHandler(void *ptr, int count)
 	#pragma clang diagnostic ignored "-Wimplicit-retain-self"
 		
 		const char *stmt = "SELECT DISTINCT \"collection\" FROM \"database2\";";
+		int stmtLen = (int)strlen(stmt);
+		
+		sqlite3_stmt *result = NULL;
+		int status = sqlite3_prepare_v2(db, stmt, stmtLen+1, &result, NULL);
+		if (status != SQLITE_OK)
+		{
+			YDBLogError(@"Error creating '%@': %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+		}
+		
+		return result;
+		
+	#pragma clang diagnostic pop
+	};
+	
+	BOOL needsFinalize = NO;
+	sqlite3_stmt *result = NULL;
+	
+	if (*statement == NULL)
+	{
+		result = *statement = CreateStatement();
+	}
+	else if (sqlite3_stmt_busy(*statement))
+	{
+		result = CreateStatement();
+		needsFinalize = YES;
+	}
+	else
+	{
+		result = *statement;
+	}
+	
+	NSParameterAssert(needsFinalizePtr != NULL);
+	*needsFinalizePtr = needsFinalize;
+	return result;
+}
+
+- (sqlite3_stmt *)enumerateCollectionsForKeyStatement:(BOOL *)needsFinalizePtr
+{
+	sqlite3_stmt **statement = &enumerateCollectionsForKeyStatement;
+	
+	sqlite3_stmt* (^CreateStatement)(void) = ^{
+	#pragma clang diagnostic push
+	#pragma clang diagnostic ignored "-Wimplicit-retain-self"
+		
+		const char *stmt = "SELECT \"collection\" FROM \"database2\" WHERE \"key\" = ?;";
 		int stmtLen = (int)strlen(stmt);
 		
 		sqlite3_stmt *result = NULL;

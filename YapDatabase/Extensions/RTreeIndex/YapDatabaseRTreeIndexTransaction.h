@@ -55,6 +55,23 @@ NS_ASSUME_NONNULL_BEGIN
 **/
 - (BOOL)getNumberOfRows:(NSUInteger *)count matchingQuery:(YapDatabaseQuery *)query;
 
+/**
+ * This method assists in performing a query over a subset of rows,
+ * where the subset is a known set of keys.
+ *
+ * For example:
+ *
+ * Say you have a known set of items, and you want to figure out which of these items fit in the rectangle.
+ *
+ * NSArray *keys = [self itemKeys];
+ * NSArray *rowids = [[[transaction ext:@"idx"] rowidsForKeys:keys inCollection:@"tracks"] allValues];
+ *
+ * YapDatabaseQuery *query =
+ *   [YapDatabaseQuery queryWithFormat:@"WHERE minLon > 0 AND maxLat <= 10 AND rowid IN (?)", rowids];
+ **/
+- (NSDictionary<NSString*, NSNumber*> *)rowidsForKeys:(NSArray<NSString *> *)keys
+										 inCollection:(nullable NSString *)collection;
+
 @end
 
 NS_ASSUME_NONNULL_END

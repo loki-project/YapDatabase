@@ -271,6 +271,7 @@ static NSString *const ext_key_class = @"class";
 - (sqlite3_stmt *)removeAllStatement;
 
 - (sqlite3_stmt *)enumerateCollectionsStatement:(BOOL *)needsFinalizePtr;
+- (sqlite3_stmt *)enumerateCollectionsForKeyStatement:(BOOL *)needsFinalizePtr;
 - (sqlite3_stmt *)enumerateKeysInCollectionStatement:(BOOL *)needsFinalizePtr;
 - (sqlite3_stmt *)enumerateKeysInAllCollectionsStatement:(BOOL *)needsFinalizePtr;
 - (sqlite3_stmt *)enumerateKeysAndMetadataInCollectionStatement:(BOOL *)needsFinalizePtr;
@@ -440,6 +441,10 @@ static NSString *const ext_key_class = @"class";
 - (void)_enumerateRowsInAllCollectionsUsingBlock:
                 (void (^)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block
      withFilter:(BOOL (^)(int64_t rowid, NSString *collection, NSString *key))filter;
+
+- (void)_enumerateRowidsForKeys:(NSArray *)keys
+                   inCollection:(NSString *)collection
+            unorderedUsingBlock:(void (^)(NSUInteger keyIndex, int64_t rowid, BOOL *stop))block;
 
 @end
 
