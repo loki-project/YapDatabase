@@ -2027,6 +2027,674 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	}
 }
 
+/**
+ * Enumerates over the given list of keys (unordered).
+ *
+ * This method is faster than fetching individual items as it optimizes cache access.
+ * That is, it will first enumerate over items in the cache and then fetch items from the database,
+ * thus optimizing the cache and reducing query size.
+ *
+ * If any keys are missing from the database, the 'object' parameter will be nil.
+ *
+ * IMPORTANT:
+ * Due to cache optimizations, the items may not be enumerated in the same order as the 'keys' parameter.
+**/
+- (void)enumerateObjectsForKeys:(NSArray *)keys
+                   inCollection:(NSString *)collection
+            unorderedUsingBlock:(void (^)(NSUInteger keyIndex, id object, BOOL *stop))block
+{
+	if (block == NULL) return;
+	if ([keys count] == 0) return;
+	if (collection == nil) collection = @"";
+	
+	YapMutationStackItem_Bool *mutation = [connection->mutationStack push]; // mutation during enumeration protection
+	BOOL stop = NO;
+	
+	// Check the cache first (to optimize cache)
+	
+	NSMutableArray *missingIndexes = [NSMutableArray arrayWithCapacity:[keys count]];
+	NSUInteger keyIndex = 0;
+	
+	for (NSString *key in keys)
+	{
+		YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
+		
+		id object = [connection->objectCache objectForKey:cacheKey];
+		if (object)
+		{
+			block(keyIndex, object, &stop);
+			
+			if (stop || mutation.isMutated) break;
+		}
+		else
+		{
+			[missingIndexes addObject:@(keyIndex)];
+		}
+		
+		keyIndex++;
+	}
+	
+	if (stop) {
+		return;
+	}
+	if (mutation.isMutated) {
+		@throw [self mutationDuringEnumerationException];
+		return;
+	}
+	if ([missingIndexes count] == 0) {
+		return;
+	}
+	
+	// Go to database for any missing keys (if needed)
+	
+	YapDatabaseString _collection; MakeYapDatabaseString(&_collection, collection);
+	
+	NSMutableDictionary *keyIndexDict = nil;
+	
+	// Sqlite has an upper bound on the number of host parameters that may be used in a single query.
+	// We need to watch out for this in case a large array of keys is passed.
+	
+	NSUInteger maxHostParams = (NSUInteger) sqlite3_limit(connection->db, SQLITE_LIMIT_VARIABLE_NUMBER, -1);
+	
+	do
+	{
+		// Determine how many parameters to use in the query
+		
+		NSUInteger numKeyParams = MIN([missingIndexes count], (maxHostParams-1)); // minus 1 for collection param
+		
+		// Create the SQL query:
+		//
+		// SELECT "key", "data" FROM "database2" WHERE "collection" = ? AND key IN (?, ?, ...);
+		
+		int const column_idx_key  = SQLITE_COLUMN_START + 0;
+		int const column_idx_data = SQLITE_COLUMN_START + 1;
+		
+		NSUInteger capacity = 80 + (numKeyParams * 3);
+		NSMutableString *query = [NSMutableString stringWithCapacity:capacity];
+		
+		[query appendString:@"SELECT \"key\", \"data\" FROM \"database2\""];
+		[query appendString:@" WHERE \"collection\" = ? AND \"key\" IN ("];
+		
+		NSUInteger i;
+		for (i = 0; i < numKeyParams; i++)
+		{
+			if (i == 0)
+				[query appendString:@"?"];
+			else
+				[query appendString:@", ?"];
+		}
+		
+		[query appendString:@");"];
+		
+		sqlite3_stmt *statement;
+		
+		int status = sqlite3_prepare_v2(connection->db, [query UTF8String], -1, &statement, NULL);
+		if (status != SQLITE_OK)
+		{
+			YDBLogError(@"Error creating 'objectsForKeys' statement: %d %s",
+						status, sqlite3_errmsg(connection->db));
+			break; // Break from do/while. Still need to free _collection.
+		}
+		
+		// Bind parameters.
+		// And move objects from the missingIndexes array into keyIndexDict.
+		
+		if (keyIndexDict == nil)
+			keyIndexDict = [NSMutableDictionary dictionaryWithCapacity:numKeyParams];
+		else
+			[keyIndexDict removeAllObjects];
+		
+		sqlite3_bind_text(statement, SQLITE_BIND_START, _collection.str, _collection.length, SQLITE_STATIC);
+		
+		for (i = 0; i < numKeyParams; i++)
+		{
+			NSNumber *keyIndexNumber = [missingIndexes objectAtIndex:i];
+			NSString *key = [keys objectAtIndex:[keyIndexNumber unsignedIntegerValue]];
+			
+			[keyIndexDict setObject:keyIndexNumber forKey:key];
+			
+			sqlite3_bind_text(statement, (int)(SQLITE_BIND_START + 1 + i), [key UTF8String], -1, SQLITE_TRANSIENT);
+		}
+		
+		[missingIndexes removeObjectsInRange:NSMakeRange(0, numKeyParams)];
+		
+		// Execute the query and step over the results
+		
+		while ((status = sqlite3_step(statement)) == SQLITE_ROW)
+		{
+			const unsigned char *text = sqlite3_column_text(statement, column_idx_key);
+			int textSize = sqlite3_column_bytes(statement, column_idx_key);
+			
+			NSString *key = [[NSString alloc] initWithBytes:text length:textSize encoding:NSUTF8StringEncoding];
+			keyIndex = [[keyIndexDict objectForKey:key] unsignedIntegerValue];
+			
+			// Note: We already checked the cache (above),
+			// so we already know this item is not in the cache.
+			
+			const void *blob = sqlite3_column_blob(statement, column_idx_data);
+			int blobSize = sqlite3_column_bytes(statement, column_idx_data);
+			
+			NSData *objectData = [NSData dataWithBytesNoCopy:(void *)blob length:blobSize freeWhenDone:NO];
+			id object = connection->database->objectDeserializer(collection, key, objectData);
+			
+			if (object)
+			{
+				YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
+				[connection->objectCache setObject:object forKey:cacheKey];
+			}
+			
+			block(keyIndex, object, &stop);
+			
+			[keyIndexDict removeObjectForKey:key];
+			
+			if (stop || mutation.isMutated) break;
+		}
+		
+		if ((status != SQLITE_DONE) && !stop && !mutation.isMutated)
+		{
+			YDBLogError(@"%@ - sqlite_step error: %d %s", THIS_METHOD, status, sqlite3_errmsg(connection->db));
+		}
+		
+		sqlite3_finalize(statement);
+		statement = NULL;
+		
+		if (stop) {
+			FreeYapDatabaseString(&_collection);
+			return;
+		}
+		if (mutation.isMutated) {
+			FreeYapDatabaseString(&_collection);
+			@throw [self mutationDuringEnumerationException];
+			return;
+		}
+		
+		// If there are any remaining items in the keyIndexDict,
+		// then those items didn't exist in the database.
+		
+		for (NSNumber *keyIndexNumber in [keyIndexDict objectEnumerator])
+		{
+			block([keyIndexNumber unsignedIntegerValue], nil, &stop);
+			
+			// Do NOT add keys to the cache that don't exist in the database.
+			
+			if (stop || mutation.isMutated) break;
+		}
+		
+		if (stop) {
+			FreeYapDatabaseString(&_collection);
+			return;
+		}
+		if (mutation.isMutated) {
+			FreeYapDatabaseString(&_collection);
+			@throw [self mutationDuringEnumerationException];
+			return;
+		}
+		
+		
+	} while ([missingIndexes count] > 0);
+	
+	FreeYapDatabaseString(&_collection);
+}
+
+/**
+ * Enumerates over the given list of keys (unordered).
+ *
+ * This method is faster than fetching individual items as it optimizes cache access.
+ * That is, it will first enumerate over items in the cache and then fetch items from the database,
+ * thus optimizing the cache and reducing query size.
+ *
+ * If any keys are missing from the database, the 'metadata' parameter will be nil.
+ *
+ * IMPORTANT:
+ * Due to cache optimizations, the items may not be enumerated in the same order as the 'keys' parameter.
+**/
+- (void)enumerateMetadataForKeys:(NSArray *)keys
+                    inCollection:(NSString *)collection
+             unorderedUsingBlock:(void (^)(NSUInteger keyIndex, id metadata, BOOL *stop))block
+{
+	if (block == NULL) return;
+	if ([keys count] == 0) return;
+	if (collection == nil) collection = @"";
+	
+	YapMutationStackItem_Bool *mutation = [connection->mutationStack push]; // mutation during enumeration protection
+	BOOL stop = NO;
+	
+	// Check the cache first (to optimize cache)
+	
+	NSMutableArray *missingIndexes = [NSMutableArray arrayWithCapacity:[keys count]];
+	NSUInteger keyIndex = 0;
+	
+	for (NSString *key in keys)
+	{
+		YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
+		
+		id metadata = [connection->metadataCache objectForKey:cacheKey];
+		if (metadata)
+		{
+			if (metadata == [YapNull null])
+				block(keyIndex, nil, &stop);
+			else
+				block(keyIndex, metadata, &stop);
+			
+			if (stop || mutation.isMutated) break;
+		}
+		else
+		{
+			[missingIndexes addObject:@(keyIndex)];
+		}
+		
+		keyIndex++;
+	}
+	
+	if (stop) {
+		return;
+	}
+	if (mutation.isMutated) {
+		@throw [self mutationDuringEnumerationException];
+		return;
+	}
+	if ([missingIndexes count] == 0) {
+		return;
+	}
+	
+	// Go to database for any missing keys (if needed)
+	
+	YapDatabaseString _collection; MakeYapDatabaseString(&_collection, collection);
+	
+	NSMutableDictionary *keyIndexDict = nil;
+	
+	// Sqlite has an upper bound on the number of host parameters that may be used in a single query.
+	// We need to watch out for this in case a large array of keys is passed.
+	
+	NSUInteger maxHostParams = (NSUInteger) sqlite3_limit(connection->db, SQLITE_LIMIT_VARIABLE_NUMBER, -1);
+	
+	do
+	{
+		// Determine how many parameters to use in the query
+		
+		NSUInteger numKeyParams = MIN([missingIndexes count], (maxHostParams-1)); // minus 1 for collection param
+		
+		// Create the SQL query:
+		//
+		// SELECT "key", "metadata" FROM "database2" WHERE "collection" = ? AND key IN (?, ?, ...);
+		
+		int const column_idx_key      = SQLITE_COLUMN_START + 0;
+		int const column_idx_metadata = SQLITE_COLUMN_START + 1;
+		
+		NSUInteger capacity = 80 + (numKeyParams * 3);
+		NSMutableString *query = [NSMutableString stringWithCapacity:capacity];
+		
+		[query appendString:@"SELECT \"key\", \"metadata\" FROM \"database2\""];
+		[query appendString:@" WHERE \"collection\" = ? AND \"key\" IN ("];
+		
+		NSUInteger i;
+		for (i = 0; i < numKeyParams; i++)
+		{
+			if (i == 0)
+				[query appendString:@"?"];
+			else
+				[query appendString:@", ?"];
+		}
+		
+		[query appendString:@");"];
+		
+		sqlite3_stmt *statement;
+		
+		int status = sqlite3_prepare_v2(connection->db, [query UTF8String], -1, &statement, NULL);
+		if (status != SQLITE_OK)
+		{
+			YDBLogError(@"Error creating 'metadataForKeys' statement: %d %s",
+						status, sqlite3_errmsg(connection->db));
+			break; // Break from do/while. Still need to free _collection.
+		}
+		
+		// Bind parameters.
+		// And move objects from the missingIndexes array into keyIndexDict.
+		
+		if (keyIndexDict == nil)
+			keyIndexDict = [NSMutableDictionary dictionaryWithCapacity:numKeyParams];
+		else
+			[keyIndexDict removeAllObjects];
+		
+		sqlite3_bind_text(statement, SQLITE_BIND_START, _collection.str, _collection.length, SQLITE_STATIC);
+		
+		for (i = 0; i < numKeyParams; i++)
+		{
+			NSNumber *keyIndexNumber = [missingIndexes objectAtIndex:i];
+			NSString *key = [keys objectAtIndex:[keyIndexNumber unsignedIntegerValue]];
+			
+			[keyIndexDict setObject:keyIndexNumber forKey:key];
+			
+			sqlite3_bind_text(statement, (int)(SQLITE_BIND_START + 1 + i), [key UTF8String], -1, SQLITE_TRANSIENT);
+		}
+		
+		[missingIndexes removeObjectsInRange:NSMakeRange(0, numKeyParams)];
+		
+		// Execute the query and step over the results
+		
+		while ((status = sqlite3_step(statement)) == SQLITE_ROW)
+		{
+			const unsigned char *text = sqlite3_column_text(statement, column_idx_key);
+			int textSize = sqlite3_column_bytes(statement, column_idx_key);
+			
+			const void *blob = sqlite3_column_blob(statement, column_idx_metadata);
+			int blobSize = sqlite3_column_bytes(statement, column_idx_metadata);
+			
+			NSString *key = [[NSString alloc] initWithBytes:text length:textSize encoding:NSUTF8StringEncoding];
+			keyIndex = [[keyIndexDict objectForKey:key] unsignedIntegerValue];
+			
+			NSData *data = [NSData dataWithBytesNoCopy:(void *)blob length:blobSize freeWhenDone:NO];
+			
+			id metadata = data ? connection->database->metadataDeserializer(collection, key, data) : nil;
+			
+			if (metadata)
+			{
+				YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
+				
+				[connection->metadataCache setObject:metadata forKey:cacheKey];
+			}
+			
+			block(keyIndex, metadata, &stop);
+			
+			[keyIndexDict removeObjectForKey:key];
+			
+			if (stop || mutation.isMutated) break;
+		}
+		
+		if ((status != SQLITE_DONE) && !stop && !mutation.isMutated)
+		{
+			YDBLogError(@"%@ - sqlite_step error: %d %s", THIS_METHOD, status, sqlite3_errmsg(connection->db));
+		}
+		
+		sqlite3_finalize(statement);
+		statement = NULL;
+		
+		if (stop) {
+			FreeYapDatabaseString(&_collection);
+			return;
+		}
+		if (mutation.isMutated) {
+			FreeYapDatabaseString(&_collection);
+			@throw [self mutationDuringEnumerationException];
+			return;
+		}
+		
+		// If there are any remaining items in the keyIndexDict,
+		// then those items didn't exist in the database.
+		
+		for (NSNumber *keyIndexNumber in [keyIndexDict objectEnumerator])
+		{
+			block([keyIndexNumber unsignedIntegerValue], nil, &stop);
+			
+			// Do NOT add keys to the cache that don't exist in the database.
+			
+			if (stop || mutation.isMutated) break;
+		}
+		
+		if (stop) {
+			FreeYapDatabaseString(&_collection);
+			return;
+		}
+		if (mutation.isMutated) {
+			FreeYapDatabaseString(&_collection);
+			@throw [self mutationDuringEnumerationException];
+			return;
+		}
+		
+		
+	} while ([missingIndexes count] > 0);
+	
+	FreeYapDatabaseString(&_collection);
+}
+
+/**
+ * Enumerates over the given list of keys (unordered).
+ *
+ * This method is faster than fetching individual items as it optimizes cache access.
+ * That is, it will first enumerate over items in the cache and then fetch items from the database,
+ * thus optimizing the cache and reducing query size.
+ *
+ * If any keys are missing from the database, the 'object' parameter will be nil.
+ *
+ * IMPORTANT:
+ * Due to cache optimizations, the items may not be enumerated in the same order as the 'keys' parameter.
+**/
+- (void)enumerateRowsForKeys:(NSArray *)keys
+                inCollection:(NSString *)collection
+         unorderedUsingBlock:(void (^)(NSUInteger keyIndex, id object, id metadata, BOOL *stop))block
+{
+	if (block == NULL) return;
+	if ([keys count] == 0) return;
+	if (collection == nil) collection = @"";
+	
+	YapMutationStackItem_Bool *mutation = [connection->mutationStack push]; // mutation during enumeration protection
+	__block BOOL stop = NO;
+	
+	// Check the cache first (to optimize cache)
+	
+	NSMutableArray *missingIndexes = [NSMutableArray arrayWithCapacity:[keys count]];
+	NSUInteger keyIndex = 0;
+	
+	for (NSString *key in keys)
+	{
+		YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
+		
+		id object = [connection->objectCache objectForKey:cacheKey];
+		if (object)
+		{
+			id metadata = [connection->metadataCache objectForKey:cacheKey];
+			if (metadata)
+			{
+				if (metadata == [YapNull null])
+					block(keyIndex, object, nil, &stop);
+				else
+					block(keyIndex, object, metadata, &stop);
+				
+				if (stop || mutation.isMutated) break;
+			}
+			else
+			{
+				[missingIndexes addObject:@(keyIndex)];
+			}
+		}
+		else
+		{
+			[missingIndexes addObject:@(keyIndex)];
+		}
+		
+		keyIndex++;
+	}
+	
+	if (stop) {
+		return;
+	}
+	if (mutation.isMutated) {
+		@throw [self mutationDuringEnumerationException];
+		return;
+	}
+	if ([missingIndexes count] == 0) {
+		return;
+	}
+	
+	// Go to database for any missing keys (if needed)
+	
+	YapDatabaseString _collection; MakeYapDatabaseString(&_collection, collection);
+	
+	NSMutableDictionary *keyIndexDict = nil;
+	
+	// Sqlite has an upper bound on the number of host parameters that may be used in a single query.
+	// We need to watch out for this in case a large array of keys is passed.
+	
+	NSUInteger maxHostParams = (NSUInteger) sqlite3_limit(connection->db, SQLITE_LIMIT_VARIABLE_NUMBER, -1);
+	
+	do
+	{
+		// Determine how many parameters to use in the query
+		
+		NSUInteger numKeyParams = MIN([missingIndexes count], (maxHostParams-1)); // minus 1 for collection param
+		
+		// Create the SQL query:
+		//
+		// SELECT "key", "data", "metadata" FROM "database2" WHERE "collection" = ? AND key IN (?, ?, ...);
+		
+		int const column_idx_key      = SQLITE_COLUMN_START + 0;
+		int const column_idx_data     = SQLITE_COLUMN_START + 1;
+		int const column_idx_metadata = SQLITE_COLUMN_START + 2;
+		
+		NSUInteger capacity = 80 + (numKeyParams * 3);
+		NSMutableString *query = [NSMutableString stringWithCapacity:capacity];
+		
+		[query appendString:@"SELECT \"key\", \"data\", \"metadata\" FROM \"database2\""];
+		[query appendString:@" WHERE \"collection\" = ? AND \"key\" IN ("];
+		
+		NSUInteger i;
+		for (i = 0; i < numKeyParams; i++)
+		{
+			if (i == 0)
+				[query appendString:@"?"];
+			else
+				[query appendString:@", ?"];
+		}
+		
+		[query appendString:@");"];
+		
+		sqlite3_stmt *statement;
+		
+		int status = sqlite3_prepare_v2(connection->db, [query UTF8String], -1, &statement, NULL);
+		if (status != SQLITE_OK)
+		{
+			YDBLogError(@"Error creating 'objectsAndMetadataForKeys' statement: %d %s",
+						status, sqlite3_errmsg(connection->db));
+			break; // Break from do/while. Still need to free _collection.
+		}
+		
+		// Bind parameters.
+		// And move objects from the missingIndexes array into keyIndexDict.
+		
+		if (keyIndexDict == nil)
+			keyIndexDict = [NSMutableDictionary dictionaryWithCapacity:numKeyParams];
+		else
+			[keyIndexDict removeAllObjects];
+		
+		sqlite3_bind_text(statement, SQLITE_BIND_START, _collection.str, _collection.length, SQLITE_STATIC);
+		
+		for (i = 0; i < numKeyParams; i++)
+		{
+			NSNumber *keyIndexNumber = [missingIndexes objectAtIndex:i];
+			NSString *key = [keys objectAtIndex:[keyIndexNumber unsignedIntegerValue]];
+			
+			[keyIndexDict setObject:keyIndexNumber forKey:key];
+			
+			sqlite3_bind_text(statement, (int)(SQLITE_BIND_START + 1 + i), [key UTF8String], -1, SQLITE_TRANSIENT);
+		}
+		
+		[missingIndexes removeObjectsInRange:NSMakeRange(0, numKeyParams)];
+		
+		// Execute the query and step over the results
+		
+		while ((status = sqlite3_step(statement)) == SQLITE_ROW)
+		{
+			const unsigned char *text = sqlite3_column_text(statement, column_idx_key);
+			int textSize = sqlite3_column_bytes(statement, column_idx_key);
+			
+			NSString *key = [[NSString alloc] initWithBytes:text length:textSize encoding:NSUTF8StringEncoding];
+			keyIndex = [[keyIndexDict objectForKey:key] unsignedIntegerValue];
+			
+			// Note: When we checked the caches (above),
+			// we could only process the item if the object & metadata were both cached.
+			// So it's worthwhile to check each individual cache here.
+			
+			YapCollectionKey *cacheKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
+			
+			id object = [connection->objectCache objectForKey:cacheKey];
+			if (object == nil)
+			{
+				const void *oBlob = sqlite3_column_blob(statement, column_idx_data);
+				int oBlobSize = sqlite3_column_bytes(statement, column_idx_data);
+				
+				NSData *oData = [NSData dataWithBytesNoCopy:(void *)oBlob length:oBlobSize freeWhenDone:NO];
+				object = connection->database->objectDeserializer(collection, key, oData);
+				
+				if (object)
+					[connection->objectCache setObject:object forKey:cacheKey];
+			}
+			
+			id metadata = [connection->metadataCache objectForKey:cacheKey];
+			if (metadata)
+			{
+				if (metadata == [YapNull null])
+					metadata = nil;
+			}
+			else
+			{
+				const void *mBlob = sqlite3_column_blob(statement, column_idx_metadata);
+				int mBlobSize = sqlite3_column_bytes(statement, column_idx_metadata);
+				
+				if (mBlobSize > 0)
+				{
+					NSData *mData = [NSData dataWithBytesNoCopy:(void *)mBlob length:mBlobSize freeWhenDone:NO];
+					metadata = connection->database->metadataDeserializer(collection, key, mData);
+				}
+				
+				if (metadata)
+					[connection->metadataCache setObject:metadata forKey:cacheKey];
+				else
+					[connection->metadataCache setObject:[YapNull null] forKey:cacheKey];
+			}
+			
+			block(keyIndex, object, metadata, &stop);
+			
+			[keyIndexDict removeObjectForKey:key];
+			
+			if (stop || mutation.isMutated) break;
+		}
+		
+		if ((status != SQLITE_DONE) && !stop && !mutation.isMutated)
+		{
+			YDBLogError(@"%@ - sqlite_step error: %d %s", THIS_METHOD, status, sqlite3_errmsg(connection->db));
+		}
+		
+		sqlite3_finalize(statement);
+		statement = NULL;
+		
+		if (stop) {
+			FreeYapDatabaseString(&_collection);
+			return;
+		}
+		if (mutation.isMutated) {
+			FreeYapDatabaseString(&_collection);
+			@throw [self mutationDuringEnumerationException];
+			return;
+		}
+		
+		// If there are any remaining items in the keyIndexDict,
+		// then those items didn't exist in the database.
+		
+		for (NSNumber *keyIndexNumber in [keyIndexDict objectEnumerator])
+		{
+			block([keyIndexNumber unsignedIntegerValue], nil, nil, &stop);
+			
+			// Do NOT add keys to the cache that don't exist in the database.
+			
+			if (stop || mutation.isMutated) break;
+		}
+		
+		if (stop) {
+			FreeYapDatabaseString(&_collection);
+			return;
+		}
+		if (mutation.isMutated) {
+			FreeYapDatabaseString(&_collection);
+			@throw [self mutationDuringEnumerationException];
+			return;
+		}
+		
+		
+	} while ([missingIndexes count] > 0);
+	
+	FreeYapDatabaseString(&_collection);
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Internal Enumerate (using rowid)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3482,6 +4150,151 @@ const NSUInteger kDefaultBatchSize = 10 * 1000;
 	{
 		@throw [self mutationDuringEnumerationException];
 	}
+}
+
+/**
+ * Fetches the rowid for each given key.
+ *
+ * The rowids are delivered unordered, which is why the block has a keyIndex parameter.
+ * If a key doesn't exist in the database, the block is never invoked for its keyIndex.
+**/
+- (void)_enumerateRowidsForKeys:(NSArray *)keys
+                   inCollection:(NSString *)collection
+            unorderedUsingBlock:(void (^)(NSUInteger keyIndex, int64_t rowid, BOOL *stop))block
+{
+	if (block == NULL) return;
+	if (keys.count == 0) return;
+	if (collection == nil) collection = @"";
+	
+	if (keys.count == 1)
+	{
+		int64_t rowid = 0;
+		if ([self getRowid:&rowid forKey:[keys firstObject] inCollection:collection])
+		{
+			BOOL stop = NO;
+			block(0, rowid, &stop);
+		}
+		
+		return;
+	}
+	
+	YapMutationStackItem_Bool *mutation = [connection->mutationStack push]; // mutation during enumeration protection
+	BOOL stop = NO;
+	
+	YapDatabaseString _collection; MakeYapDatabaseString(&_collection, collection);
+	
+	NSMutableDictionary *keyIndexDict = nil;
+	
+	// Sqlite has an upper bound on the number of host parameters that may be used in a single query.
+	// We need to watch out for this in case a large array of keys is passed.
+	
+	NSUInteger maxHostParams = (NSUInteger) sqlite3_limit(connection->db, SQLITE_LIMIT_VARIABLE_NUMBER, -1);
+	NSUInteger offset = 0;
+	
+	do
+	{
+		// Determine how many parameters to use in the query
+		
+		NSUInteger left = keys.count - offset;
+		NSUInteger numKeyParams = MIN(left, (maxHostParams-1)); // minus 1 for collection param
+		
+		// Create the SQL query:
+		//
+		// SELECT "rowid", "key" FROM "database2" WHERE "collection" = ? AND key IN (?, ?, ...);
+		
+		int const column_idx_rowid = SQLITE_COLUMN_START + 0;
+		int const column_idx_key   = SQLITE_COLUMN_START + 1;
+		
+		NSUInteger capacity = 80 + (numKeyParams * 3);
+		NSMutableString *query = [NSMutableString stringWithCapacity:capacity];
+		
+		[query appendString:@"SELECT \"rowid\", \"key\" FROM \"database2\""];
+		[query appendString:@" WHERE \"collection\" = ? AND \"key\" IN ("];
+		
+		NSUInteger i;
+		for (i = 0; i < numKeyParams; i++)
+		{
+			if (i == 0)
+				[query appendString:@"?"];
+			else
+				[query appendString:@", ?"];
+		}
+		
+		[query appendString:@");"];
+		
+		sqlite3_stmt *statement;
+		
+		int status = sqlite3_prepare_v2(connection->db, [query UTF8String], -1, &statement, NULL);
+		if (status != SQLITE_OK)
+		{
+			YDBLogError(@"Error creating 'objectsForKeys' statement: %d %s",
+						status, sqlite3_errmsg(connection->db));
+			break; // Break from do/while. Still need to free _collection.
+		}
+		
+		// Bind parameters.
+		// And move objects from the missingIndexes array into keyIndexDict.
+		
+		if (!keyIndexDict)
+			keyIndexDict = [NSMutableDictionary dictionaryWithCapacity:numKeyParams];
+		else
+			[keyIndexDict removeAllObjects];
+		
+		sqlite3_bind_text(statement, SQLITE_BIND_START, _collection.str, _collection.length, SQLITE_STATIC);
+		
+		for (i = 0; i < numKeyParams; i++)
+		{
+			NSUInteger keyIndex = i + offset;
+			NSString *key = keys[keyIndex];
+			
+			[keyIndexDict setObject:@(keyIndex) forKey:key];
+			
+			sqlite3_bind_text(statement, (int)(SQLITE_BIND_START + 1 + i), [key UTF8String], -1, SQLITE_TRANSIENT);
+		}
+		
+		// Execute the query and step over the results
+		
+		while ((status = sqlite3_step(statement)) == SQLITE_ROW)
+		{
+			int64_t rowid = sqlite3_column_int64(statement, column_idx_rowid);
+			
+			const unsigned char *text = sqlite3_column_text(statement, column_idx_key);
+			int textSize = sqlite3_column_bytes(statement, column_idx_key);
+			
+			NSString *key = [[NSString alloc] initWithBytes:text length:textSize encoding:NSUTF8StringEncoding];
+			NSUInteger keyIndex = [[keyIndexDict objectForKey:key] unsignedIntegerValue];
+			
+			// Note: We already checked the cache (above),
+			// so we already know this item is not in the cache.
+			
+			block(keyIndex, rowid, &stop);
+			
+			if (stop || mutation.isMutated) break;
+		}
+		
+		if ((status != SQLITE_DONE) && !stop && !mutation.isMutated)
+		{
+			YDBLogError(@"%@ - sqlite_step error: %d %s", THIS_METHOD, status, sqlite3_errmsg(connection->db));
+		}
+		
+		sqlite3_finalize(statement);
+		statement = NULL;
+		
+		if (stop) {
+			FreeYapDatabaseString(&_collection);
+			return;
+		}
+		if (mutation.isMutated) {
+			FreeYapDatabaseString(&_collection);
+			@throw [self mutationDuringEnumerationException];
+			return;
+		}
+		
+		offset += numKeyParams;
+		
+	} while (offset < keys.count);
+	
+	FreeYapDatabaseString(&_collection);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
