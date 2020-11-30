@@ -1732,7 +1732,9 @@ const NSUInteger kDefaultBatchSize = 1000;
 		[self _enumerateKeysAndObjectsInCollection:collection
 		                                usingBlock:^(int64_t __unused rowid, NSString *key, id object, BOOL *stop) {
 			
-			block(key, object, stop);
+            if (object != nil) {
+                block(key, object, stop);
+            }
 			
 		} withFilter:^BOOL(int64_t __unused rowid, NSString *key) {
 			
@@ -1744,7 +1746,9 @@ const NSUInteger kDefaultBatchSize = 1000;
 		[self _enumerateKeysAndObjectsInCollection:collection
 		                                usingBlock:^(int64_t __unused rowid, NSString *key, id object, BOOL *stop) {
 			
-			block(key, object, stop);
+            if (object != nil) {
+                block(key, object, stop);
+            }
 			
 		} withFilter:NULL];
 	}
@@ -1788,7 +1792,9 @@ const NSUInteger kDefaultBatchSize = 1000;
 		[self _enumerateKeysAndObjectsInAllCollectionsUsingBlock:
 		    ^(int64_t __unused rowid, NSString *collection, NSString *key, id object, BOOL *stop) {
 			
-			block(collection, key, object, stop);
+            if (object != nil) {
+                block(collection, key, object, stop);
+            }
 			
 		} withFilter:^BOOL(int64_t __unused rowid, NSString *collection, NSString *key) {
 			
@@ -1800,7 +1806,9 @@ const NSUInteger kDefaultBatchSize = 1000;
 		[self _enumerateKeysAndObjectsInAllCollectionsUsingBlock:
 		    ^(int64_t __unused rowid, NSString *collection, NSString *key, id object, BOOL *stop) {
 			
-			block(collection, key, object, stop);
+            if (object != nil) {
+                block(collection, key, object, stop);
+            }
 			
 		} withFilter:NULL];
 	}
@@ -1953,7 +1961,9 @@ const NSUInteger kDefaultBatchSize = 1000;
 		[self _enumerateRowsInCollection:collection
 		                      usingBlock:^(int64_t __unused rowid, NSString *key, id object, id metadata, BOOL *stop) {
 			
-			block(key, object, metadata, stop);
+            if (object != nil) {
+                block(key, object, metadata, stop);
+            }
 			
 		} withFilter:^BOOL(int64_t __unused rowid, NSString *key) {
 			
@@ -1965,7 +1975,9 @@ const NSUInteger kDefaultBatchSize = 1000;
 		[self _enumerateRowsInCollection:collection
 		                      usingBlock:^(int64_t __unused rowid, NSString *key, id object, id metadata, BOOL *stop) {
 			
-			block(key, object, metadata, stop);
+            if (object != nil) {
+                block(key, object, metadata, stop);
+            }
 			
 		} withFilter:NULL];
 	}
@@ -2009,7 +2021,9 @@ const NSUInteger kDefaultBatchSize = 1000;
 		[self _enumerateRowsInAllCollectionsUsingBlock:
 		    ^(int64_t __unused rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop) {
 			
-			block(collection, key, object, metadata, stop);
+            if (object != nil) {
+                block(collection, key, object, metadata, stop);
+            }
 			
 		} withFilter:^BOOL(int64_t __unused rowid, NSString *collection, NSString *key) {
 			
@@ -2021,7 +2035,9 @@ const NSUInteger kDefaultBatchSize = 1000;
 		[self _enumerateRowsInAllCollectionsUsingBlock:
 		    ^(int64_t __unused rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop) {
 			
-			block(collection, key, object, metadata, stop);
+            if (object != nil) {
+                block(collection, key, object, metadata, stop);
+            }
 			
 		} withFilter:NULL];
 	}
