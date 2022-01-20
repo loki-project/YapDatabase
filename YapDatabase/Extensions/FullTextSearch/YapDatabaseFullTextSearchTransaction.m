@@ -1122,10 +1122,10 @@ static NSString *const ext_key__version_deprecated = @"version";
 	int const column_idx_rowid        = SQLITE_COLUMN_START + 0;
 	int const column_idx_snippet      = SQLITE_COLUMN_START + 1;
 	
-	int const bind_idx_startMatchText = SQLITE_BIND_START + 0;
-	int const bind_idx_endMatchText   = SQLITE_BIND_START + 1;
-	int const bind_idx_ellipsesText   = SQLITE_BIND_START + 2;
-	int const bind_idx_columnIndex    = SQLITE_BIND_START + 3;
+    int const bind_idx_columnIndex    = SQLITE_BIND_START + 0;
+	int const bind_idx_startMatchText = SQLITE_BIND_START + 1;
+	int const bind_idx_endMatchText   = SQLITE_BIND_START + 2;
+    int const bind_idx_ellipsesText   = SQLITE_BIND_START + 3;
 	int const bind_idx_numTokens      = SQLITE_BIND_START + 4;
 	int const bind_idx_query          = SQLITE_BIND_START + 5;
 	
