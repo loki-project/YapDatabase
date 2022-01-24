@@ -3257,7 +3257,9 @@ const NSUInteger kDefaultBatchSize = 1000;
 				}
 			}
 			
-			block(rowid, collection, key, object, &stop);
+            if (object != nil) {
+                block(rowid, collection, key, object, &stop);
+            }
 		}
     }];
 	
